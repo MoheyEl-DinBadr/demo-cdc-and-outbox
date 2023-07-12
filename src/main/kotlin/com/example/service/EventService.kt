@@ -3,8 +3,8 @@ package com.example.service
 import com.example.model.Event
 import com.example.repo.EventRepo
 import com.github.javafaker.Faker
-import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
+import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.kafka.KafkaClientService
 import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata.OutgoingKafkaRecordMetadataBuilder
@@ -19,25 +19,23 @@ import java.time.LocalDateTime
 import java.util.stream.Collectors
 import java.util.stream.IntStream
 
-@Startup
 @ApplicationScoped
 class EventService(val repo: EventRepo, val kafkaClient: KafkaClientService) {
 
+    fun findEarliestNonProcessed(): Multi<Event> = repo.findEarliestNonProcessed()
+    fun update(events: List<Event>): Uni<Void> = repo.update(events)
+    fun update(event: Event): Uni<Event> = repo.update(event)
 
-    @Scheduled(every = "3m")
-    fun processEvents() {
-        repo.findEarliestNonProcessed()
-                .onItem().transformToUni { publishEvent(it) }
-                .merge()
-                .map { it.processed = true; it }
-                .collect()
-                .asList()
-                .flatMap { repo.update(it) }
-                .await().indefinitely()
+    fun updateEventStatus(event: Event): Event {
+        event.processed = true
+        return event
+    }
+    fun updateDocument(id:ObjectId, event: String, topic:String, soeTime:LocalDateTime, processed:Boolean): Uni<Event>  {
+
+        val eventObj:Event = Event(id, event, soeTime, topic, processed)
+        return repo.persistOrUpdate(eventObj)
     }
 
-
-    fun save(event: Event): Uni<Event> = repo.persist(event)
 
     fun publishEvent(event: Event): Uni<Event> {
 
@@ -61,7 +59,7 @@ class EventService(val repo: EventRepo, val kafkaClient: KafkaClientService) {
 
     @Scheduled(every = "1m")
     fun generateData() {
-        val faker = Faker.instance()
+            val faker = Faker.instance()
         val list = IntStream.range(0, 10)
                 .boxed()
                 .map { Event(ObjectId.get(), faker.address().firstName(), LocalDateTime.now(), "topic${it}") }
